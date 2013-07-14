@@ -10,18 +10,22 @@ import net.tenthbit.protocol._
 
 import java.net.InetSocketAddress
 
-case class Broadcast(obj: JObject)
+case class Broadcast(obj: Payload)
+case class BroadcastString(obj: String)
+case class Disconnection(handler: ActorRef)
 
 class Server extends Actor {
   import Tcp._
   import context.system
 
-  val clientHandlers = scala.collection.mutable.MutableList[ActorRef]()
+  val clientHandlers = scala.collection.mutable.ArrayBuffer[ActorRef]()
 
   IO(Tcp) ! Bind(self, new InetSocketAddress("localhost", 10817))
 
   def receive = {
     case Broadcast(obj) => clientHandlers.foreach(_ ! obj)
+    case BroadcastString(obj) => clientHandlers.foreach(_ ! obj)
+    case Disconnection(handler) => clientHandlers -= handler
     case b @ Bound(localAddress) => println("Hello: " + localAddress)
     case CommandFailed(_: Bind) => context stop self
     case c @ Connected(remote, local) => {
@@ -31,13 +35,13 @@ class Server extends Actor {
       val connection = sender
       connection ! Register(handler)
 
-      val welcome = (
-        ("op" -> "welcome") ~
-        ("ex" ->
-          ("server" -> "elrod.me") ~
-          ("software" -> "10bit Scala, 1.0.0") ~
-          ("now" -> System.currentTimeMillis) ~
-          ("auth" -> List("password", "anonymous"))))
+      val welcome = Welcome(
+        Some(
+          WelcomeExtras(
+            "elrod.me",
+            "scala-10b/1.0.0",
+            List("password", "anonymous"),
+            System.currentTimeMillis)))
 
       handler ! welcome
     }
@@ -47,5 +51,5 @@ class Server extends Actor {
 
 object Server extends App {
   val system = ActorSystem("ScalaTenthbitSystem")
-   system.actorOf(Props(new Server))
+  system.actorOf(Props(new Server))
 }

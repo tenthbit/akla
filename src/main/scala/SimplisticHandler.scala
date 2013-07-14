@@ -14,10 +14,13 @@ class SimplisticHandler(server: ActorRef, connection: ActorRef) extends Actor {
   implicit val formats = Serialization.formats(NoTypeHints)
 
   def receive = {
-    case payload: JObject => connection ! Write(ByteString(write(payload) + "\n", "utf-8"))
+    case payload: Payload => connection ! Write(ByteString(write(payload) + "\n", "utf-8"))
+    case payload: String => connection ! Write(ByteString(write(payload) + "\n", "utf-8"))
+    case e: ConnectionClosed => server ! Disconnection(self)
     case Received(data) => {
       val json = parse(data.decodeString("utf-8"))
       (json \ "op").extract[String] match {
+        case "act" => server ! BroadcastString(write(json))
         case "auth" => {
           val username = (json \ "ex" \ "username") match {
             case JString(username) => Some(username)
@@ -39,7 +42,7 @@ class SimplisticHandler(server: ActorRef, connection: ActorRef) extends Actor {
                 ("for" -> "auth")))
           }
         }
-        case otherwise => server ! Broadcast(("op" -> "ack") ~ ("ex" -> ("for" -> otherwise)))
+        case otherwise => server ! Broadcast(Ack(Some(AckExtras(otherwise))))
       }
     }
     case PeerClosed => context stop self
