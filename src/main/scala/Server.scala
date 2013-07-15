@@ -6,6 +6,8 @@ import akka.io.TcpPipelineHandler.{ Init, WithinActorContext }
 import akka.pattern.ask
 import akka.util.{ ByteString, Timeout }
 
+import com.typesafe.config._
+
 import net.liftweb.json._
 import net.liftweb.json.JsonDSL._
 import net.liftweb.json.Serialization.{ read, write }
@@ -21,21 +23,20 @@ import java.security.KeyStore
 import javax.net.ssl.{ SSLContext, SSLEngine, TrustManagerFactory, KeyManagerFactory }
 
 object TenthbitSSL {
-  // https://github.com/cloudaloe/pipe/blob/master/src/main/scala/pipe/ssl.scala
-  val context: SSLContext = SSLContext.getInstance("SSLv3")
-  val keyStore = KeyStore.getInstance("JKS")
-  val keyStoreFile = new FileInputStream("/home/ricky/devel/tenthbit/ssl/keystore.jks")
-  val keyStorePassword = ""
-  keyStore.load(keyStoreFile, keyStorePassword.toCharArray)
-  keyStoreFile.close
+  def apply(keyStorePath: String, keyStorePassword: String) = {
+    // https://github.com/cloudaloe/pipe/blob/master/src/main/scala/pipe/ssl.scala
+    val context: SSLContext = SSLContext.getInstance("SSLv3")
+    val keyStore = KeyStore.getInstance("JKS")
+    val keyStoreFile = new FileInputStream(keyStorePath)
+    keyStore.load(keyStoreFile, keyStorePassword.toCharArray)
+    keyStoreFile.close
 
-  val keyManagerFactory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm)
-  val trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm)
-  keyManagerFactory.init(keyStore, keyStorePassword.toCharArray)
-  trustManagerFactory.init(keyStore)
-  context.init(keyManagerFactory.getKeyManagers, trustManagerFactory.getTrustManagers, null)
+    val keyManagerFactory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm)
+    val trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm)
+    keyManagerFactory.init(keyStore, keyStorePassword.toCharArray)
+    trustManagerFactory.init(keyStore)
+    context.init(keyManagerFactory.getKeyManagers, trustManagerFactory.getTrustManagers, null)
 
-  def getEngine: SSLEngine = {
     val engine: SSLEngine = context.createSSLEngine
     engine setUseClientMode false
     engine setNeedClientAuth false
@@ -48,6 +49,8 @@ case class BroadcastString(obj: String)
 case class Disconnection(handler: ActorRef)
 
 class Server extends Actor with ActorLogging {
+  val conf = ConfigFactory.load()
+
   import Tcp._
   import context.system
 
@@ -55,7 +58,7 @@ class Server extends Actor with ActorLogging {
   implicit val timeout = Timeout(300.millis)
   val clientPipelines = scala.collection.mutable.ArrayBuffer[(Init[WithinActorContext, String, String], ActorRef)]()
 
-  IO(Tcp) ! Bind(self, new InetSocketAddress("0.0.0.0", 10817))
+  IO(Tcp) ! Bind(self, new InetSocketAddress(conf.getString("server.bind"), conf.getInt("server.port")))
 
   def receive: Receive = {
     case _: Bound => context.become(bound(sender))
@@ -67,12 +70,16 @@ class Server extends Actor with ActorLogging {
       clientPipelines.foreach { case (init, pipeline) => pipeline ! init.Command(write(obj) + "\n") }
     }
     case Connected(remote, _) => {
+      val sslEngine = TenthbitSSL(
+        conf.getString("server.ssl.keystore"),
+        conf.getString("server.ssl.password"))
+
       val init = TcpPipelineHandler.withLogger(
         log,
         new StringByteStringAdapter("utf-8") >>
           new DelimiterFraming(maxSize = 1024, delimiter = ByteString('\n'), includeDelimiter = true) >>
             new TcpReadWriteAdapter >>
-              new SslTlsSupport(TenthbitSSL.getEngine) >>
+              new SslTlsSupport(sslEngine) >>
                 new BackpressureBuffer(lowBytes = 100, highBytes = 1000, maxBytes = 1000000))
 
       val connection = sender
