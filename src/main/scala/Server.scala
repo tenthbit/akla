@@ -91,7 +91,7 @@ class Server extends Actor with ActorLogging {
         val welcome = Welcome(
           Some(
             WelcomeExtras(
-              "bit.elrod.me",
+              conf.getString("server.host"),
               "akla/1.0.0",
               List("password"),
               System.currentTimeMillis)))

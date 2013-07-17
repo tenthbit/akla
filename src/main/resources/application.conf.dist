@@ -1,12 +1,14 @@
 server {
+  # Quote IPs, so they don't throw number format exceptions.
   bind: "0.0.0.0"
   port: 10817
+  host: bit.elrod.me
 
   ssl {
     keystore: /home/ricky/devel/tenthbit/ssl/keystore.jks
 
-    // Keystore password.
-    // TODO: Key password
+    # Keystore password.
+    # TODO: Key password
     password: ChangeMe321321
   }
 }
