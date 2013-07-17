@@ -11,6 +11,7 @@ import net.liftweb.json.JsonDSL._
 import net.liftweb.json.Serialization.{ read, write }
 import net.tenthbit.protocol._
 
+import java.util.UUID
 
 class SslHandler(server: ActorRef, init: Init[WithinActorContext, String, String])
   extends Actor with ActorLogging {
@@ -25,13 +26,19 @@ class SslHandler(server: ActorRef, init: Init[WithinActorContext, String, String
     private def addAck(a: JValue): JValue =
       a merge decompose(Map("ex" -> decompose(Map("isack" -> true))))
 
+    private def addTimestamp(a: JValue): JValue =
+      a merge decompose(Map("ts" ->  System.currentTimeMillis))
+
+    private def addID(a: JValue): JValue =
+      a merge decompose(Map("id" ->  UUID.randomUUID.toString))
+
     def receive = {
       // TODO: Actually do something with this.
       case e: ConnectionClosed => server ! Disconnection(self)
       case init.Event(data) => {
         val json = parse(data)
         (json \ "op").extract[String] match {
-          case otherwise => sender ! renderJValue(addAck(json))
+          case otherwise => sender ! renderJValue((addAck _ compose addTimestamp _ compose addID _)(json))
         }
       }
     }
