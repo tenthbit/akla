@@ -91,9 +91,9 @@ class Server extends Actor with ActorLogging {
         val welcome = Welcome(
           Some(
             WelcomeExtras(
-              "elrod.me",
-              "scala-10b/1.0.0",
-              List("password", "anonymous"),
+              "bit.elrod.me",
+              "akla/1.0.0",
+              List("password"),
               System.currentTimeMillis)))
 
         pipeline ! init.Command(write(welcome) + "\n")
