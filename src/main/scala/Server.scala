@@ -46,8 +46,10 @@ object TenthbitSSL {
 
 case class Broadcast(obj: Payload)
 case class BroadcastString(obj: String)
-case class Client(handler: ActorRef, init: Init[WithinActorContext, String, String])
+case class BroadcastChannelString(name: String, obj: String)
+case class Client(handler: ActorRef, pipeline: ActorRef, init: Init[WithinActorContext, String, String])
 case class Disconnection(handler: ActorRef)
+case class Join(name: String)
 
 class Server extends Actor with ActorLogging {
   val conf = ConfigFactory.load()
@@ -61,14 +63,31 @@ class Server extends Actor with ActorLogging {
 
   IO(Tcp) ! Bind(self, new InetSocketAddress(conf.getString("server.bind"), conf.getInt("server.port")))
 
+  // TODO: This will end up being mutable, but that's fine here.
+  val rooms: Map[String, ActorRef] = Map(
+    "firstchannel" -> context.actorOf(Props(new Room))
+  )
+
   def receive: Receive = {
     case _: Bound => context.become(bound(sender))
   }
 
   def bound(listener: ActorRef): Receive = {
-    case Broadcast(obj) => {
-      clientPipelines.foreach(e => println(e))
-      clientPipelines.foreach { case Client( pipeline, init) => pipeline ! init.Command(write(obj) + "\n") }
+    case Broadcast(obj) =>
+      clientPipelines.foreach { case Client(handler, pipeline, init) => pipeline ! init.Command(write(obj) + "\n") }
+    case BroadcastChannelString(name, obj) => {
+      val room = rooms.get(name)
+      if (room.isDefined) {
+        room.get ! BroadcastString(obj)
+        sender ! true
+      } else {
+        sender ! false
+      }
+    }
+    case Join(name) => {
+      clientPipelines.find(_.handler == sender).map { client =>
+        rooms.get(name).map(_ ! Room.Join(client))
+      }
     }
     case Connected(remote, _) => {
       val sslEngine = TenthbitSSL(
@@ -86,7 +105,7 @@ class Server extends Actor with ActorLogging {
       val connection = sender
       val handler = context.actorOf(Props(new SslHandler(self, init)).withDeploy(Deploy.local))
       val pipeline = context.actorOf(TcpPipelineHandler.props(init, connection, handler).withDeploy(Deploy.local))
-      clientPipelines += Client(pipeline, init)
+      clientPipelines += Client(handler, pipeline, init)
 
       (connection ? Tcp.Register(pipeline)) onComplete { case _ =>
         val welcome = Welcome(
