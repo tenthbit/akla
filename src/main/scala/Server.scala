@@ -46,6 +46,7 @@ object TenthbitSSL {
 
 case class Broadcast(obj: Payload)
 case class BroadcastString(obj: String)
+case class Client(handler: ActorRef, init: Init[WithinActorContext, String, String])
 case class Disconnection(handler: ActorRef)
 
 class Server extends Actor with ActorLogging {
@@ -56,7 +57,7 @@ class Server extends Actor with ActorLogging {
 
   implicit val defaults = DefaultFormats
   implicit val timeout = Timeout(300.millis)
-  val clientPipelines = scala.collection.mutable.ArrayBuffer[(Init[WithinActorContext, String, String], ActorRef)]()
+  val clientPipelines = scala.collection.mutable.ArrayBuffer[Client]()
 
   IO(Tcp) ! Bind(self, new InetSocketAddress(conf.getString("server.bind"), conf.getInt("server.port")))
 
@@ -67,7 +68,7 @@ class Server extends Actor with ActorLogging {
   def bound(listener: ActorRef): Receive = {
     case Broadcast(obj) => {
       clientPipelines.foreach(e => println(e))
-      clientPipelines.foreach { case (init, pipeline) => pipeline ! init.Command(write(obj) + "\n") }
+      clientPipelines.foreach { case Client( pipeline, init) => pipeline ! init.Command(write(obj) + "\n") }
     }
     case Connected(remote, _) => {
       val sslEngine = TenthbitSSL(
@@ -85,7 +86,7 @@ class Server extends Actor with ActorLogging {
       val connection = sender
       val handler = context.actorOf(Props(new SslHandler(self, init)).withDeploy(Deploy.local))
       val pipeline = context.actorOf(TcpPipelineHandler.props(init, connection, handler).withDeploy(Deploy.local))
-      clientPipelines += ((init, pipeline))
+      clientPipelines += Client(pipeline, init)
 
       (connection ? Tcp.Register(pipeline)) onComplete { case _ =>
         val welcome = Welcome(
